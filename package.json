@@ -1,0 +1,15 @@
+{
+  "name": "mock-excel-report",
+  "version": "1.0.0",
+  "description": "帳票Excelに金額・名前・日付を埋め込むモックサーバー",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build-template": "node create-template.js"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "multer": "^2.3.0"
+  }
+}
