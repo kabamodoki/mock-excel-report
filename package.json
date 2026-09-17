@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build-template": "node create-template.js"
+    "build-template": "node create-template.js",
+    "build-samples": "node create-samples.js"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
