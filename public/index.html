@@ -86,20 +86,54 @@
   th, td { text-align: left; padding: 8px 6px; font-size: 13px; border-bottom: 1px solid #eee; }
   th { color: #666; font-weight: bold; }
   td.dl-cell { text-align: right; }
-  td.dl-cell a.dl-btn {
+  td.dl-cell .dl-btn {
     display: inline-block;
     padding: 6px 12px;
     font-size: 13px;
     font-weight: bold;
     color: #fff;
     background: #2f6fed;
+    border: none;
     border-radius: 6px;
     text-decoration: none;
+    cursor: pointer;
   }
   td.dl-cell button.delete-btn {
     padding: 6px 12px;
     font-size: 13px;
     background: #c0392b;
+  }
+
+  .dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .dialog-box {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px;
+    width: 320px;
+    max-width: calc(100vw - 40px);
+  }
+  .dialog-box h3 { font-size: 15px; margin: 0 0 14px; }
+  .dialog-box .radio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: normal;
+    padding: 8px 0;
+  }
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
   }
 
   .fields-table code { font-size: 12px; }
@@ -167,6 +201,25 @@
     </section>
   </div>
 
+  <!-- ========== 日付の表示形式ダイアログ(開始日/終了日を含むテンプレートのダウンロード時のみ表示) ========== -->
+  <div id="calendar-dialog-overlay" class="dialog-overlay" hidden>
+    <div class="dialog-box">
+      <h3>日付の表示形式を選択してください</h3>
+      <label class="radio-row">
+        <input type="radio" name="calendar-type" value="gregorian" checked>
+        西暦(例: 2026年10月01日)
+      </label>
+      <label class="radio-row">
+        <input type="radio" name="calendar-type" value="era">
+        和暦(例: 令和8年10月01日)
+      </label>
+      <div class="dialog-actions">
+        <button type="button" id="calendar-cancel-btn" class="secondary">キャンセル</button>
+        <button type="button" id="calendar-ok-btn">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div id="status"></div>
 
   <script>
@@ -178,8 +231,44 @@
     const savedTbodyUpload = document.getElementById('saved-tbody-upload');
     const savedTbodyDownload = document.getElementById('saved-tbody-download');
     const fieldsTbody = document.getElementById('fields-tbody');
+    const calendarOverlay = document.getElementById('calendar-dialog-overlay');
+    const calendarOkBtn = document.getElementById('calendar-ok-btn');
+    const calendarCancelBtn = document.getElementById('calendar-cancel-btn');
 
     let pendingFiles = [];
+    let calendarDialogTarget = null;
+
+    // 実際のファイルダウンロードを発火させる(download属性付きの一時的なリンクをクリックする)
+    function triggerDownload(tpl, calendarType) {
+      const query = calendarType ? `?calendar=${calendarType}` : '';
+      const a = document.createElement('a');
+      a.href = `/api/report/generate/${encodeURIComponent(tpl.id)}${query}`;
+      a.download = tpl.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    // 開始日/終了日を含むテンプレートは、ダウンロード前に西暦/和暦を選ぶダイアログを出す
+    function openCalendarDialog(tpl) {
+      calendarDialogTarget = tpl;
+      document.querySelector('input[name="calendar-type"][value="gregorian"]').checked = true;
+      calendarOverlay.hidden = false;
+    }
+
+    function closeCalendarDialog() {
+      calendarOverlay.hidden = true;
+      calendarDialogTarget = null;
+    }
+
+    calendarCancelBtn.addEventListener('click', closeCalendarDialog);
+
+    calendarOkBtn.addEventListener('click', () => {
+      if (!calendarDialogTarget) return;
+      const selected = document.querySelector('input[name="calendar-type"]:checked').value;
+      triggerDownload(calendarDialogTarget, selected);
+      closeCalendarDialog();
+    });
 
     function setStatus(message, type) {
       statusEl.className = type || '';
@@ -310,12 +399,22 @@
         nameTd.textContent = tpl.name;
         const dlTd = document.createElement('td');
         dlTd.className = 'dl-cell';
-        const dlLink = document.createElement('a');
-        dlLink.className = 'dl-btn';
-        dlLink.href = `/api/report/generate/${encodeURIComponent(tpl.id)}`;
-        dlLink.download = tpl.name;
-        dlLink.textContent = 'ダウンロード';
-        dlTd.appendChild(dlLink);
+        if (tpl.hasDateFields) {
+          // 開始日/終了日を含むテンプレートは、先に西暦/和暦ダイアログを挟む
+          const dlBtn = document.createElement('button');
+          dlBtn.type = 'button';
+          dlBtn.className = 'dl-btn';
+          dlBtn.textContent = 'ダウンロード';
+          dlBtn.addEventListener('click', () => openCalendarDialog(tpl));
+          dlTd.appendChild(dlBtn);
+        } else {
+          const dlLink = document.createElement('a');
+          dlLink.className = 'dl-btn';
+          dlLink.href = `/api/report/generate/${encodeURIComponent(tpl.id)}`;
+          dlLink.download = tpl.name;
+          dlLink.textContent = 'ダウンロード';
+          dlTd.appendChild(dlLink);
+        }
         const deleteTdDownload = document.createElement('td');
         deleteTdDownload.className = 'dl-cell';
         deleteTdDownload.appendChild(makeDeleteButton(tpl));

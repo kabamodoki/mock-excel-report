@@ -32,6 +32,7 @@ const PLACEHOLDER_RE = /\$\{\{\s*([^}]+?)\s*\}\}/g;
 const EXACT_PLACEHOLDER_RE = /^\$\{\{\s*([^}]+?)\s*\}\}$/;
 
 // 埋め込めるデータ(モック用の固定値)。本番ではDBから取得する想定。
+// 日付はDateオブジェクトで持ち、ダウンロード時に西暦/和暦を選んで文字列化する。
 const DATA = {
   prefecture: '東京都',
   address: '港区六本木',
@@ -39,20 +40,63 @@ const DATA = {
   building: '六本木ヒルズレジデンスB棟101',
   lastName: '山田',
   firstName: '太郎',
-  startDate: '2026年10月01日',
-  endDate: '2027年03月31日',
+  startDate: new Date(2026, 9, 1), // 2026年10月01日
+  endDate: new Date(2027, 2, 31), // 2027年03月31日
   sampleText1: 'これはサンプルテキストです',
   sampleNumber: 190000,
   checkboxTrue: true,
   checkboxFalse: false,
 };
 
-// 値の種類。数値・真偽値はセル全体が1つのプレースホルダーだけの場合、型を保ったまま埋め込む。
+// 値の種類。number/booleanはセル全体が1つのプレースホルダーだけの場合、型を保ったまま埋め込む。
+// dateは西暦/和暦の選択に応じて文字列化する。
 const VALUE_KINDS = {
   sampleNumber: 'number',
   checkboxTrue: 'boolean',
   checkboxFalse: 'boolean',
+  startDate: 'date',
+  endDate: 'date',
 };
+
+// 日付項目のキー一覧(ダウンロード時に西暦/和暦ダイアログを出すかどうかの判定に使う)
+const DATE_FIELD_KEYS = Object.entries(VALUE_KINDS)
+  .filter(([, kind]) => kind === 'date')
+  .map(([key]) => key);
+
+// チェックボックスの表示: true→☑ / false→☐
+function checkboxSymbol(value) {
+  return value ? '☑' : '☐';
+}
+
+// 元号の変換表(開始日が新しい順)
+const ERAS = [
+  { name: '令和', start: new Date(2019, 4, 1) },
+  { name: '平成', start: new Date(1989, 0, 8) },
+  { name: '昭和', start: new Date(1926, 11, 25) },
+  { name: '大正', start: new Date(1912, 6, 30) },
+  { name: '明治', start: new Date(1868, 8, 8) },
+];
+
+function formatDateGregorian(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}年${m}月${d}日`;
+}
+
+function formatDateEra(date) {
+  const era = ERAS.find((e) => date >= e.start) || ERAS[ERAS.length - 1];
+  const eraYear = date.getFullYear() - era.start.getFullYear() + 1;
+  const yearLabel = eraYear === 1 ? '元' : String(eraYear);
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${era.name}${yearLabel}年${m}月${d}日`;
+}
+
+// calendarType: 'era'(和暦) 以外は西暦として扱う
+function formatDateValue(date, calendarType) {
+  return calendarType === 'era' ? formatDateEra(date) : formatDateGregorian(date);
+}
 
 // プレースホルダーのエイリアス(テンプレート内の表記) -> DATAのキー
 const ALIASES = {
@@ -83,28 +127,32 @@ function normalizeKey(raw) {
   return ALIASES[raw.trim()] || null;
 }
 
-// セル全体がプレースホルダーだけの場合の値(型を保持: 数値は数値のまま、真偽値は真偽値のまま)
-function exactValueFor(key) {
+// セル全体がプレースホルダーだけの場合の値(型を保持: 数値は数値のまま。
+// 真偽値はチェックボックス記号、日付は西暦/和暦の文字列にする)
+function exactValueFor(key, calendarType) {
   const kind = VALUE_KINDS[key] || 'string';
   const raw = DATA[key];
   if (kind === 'number') return Number(raw);
-  if (kind === 'boolean') return Boolean(raw);
+  if (kind === 'boolean') return checkboxSymbol(Boolean(raw));
+  if (kind === 'date') return formatDateValue(raw, calendarType);
   return String(raw);
 }
 
-// 文中に埋め込む場合の文字列表現(数値はカンマ区切り、真偽値はtrue/falseの文字列)
-function textValueFor(key) {
+// 文中に埋め込む場合の文字列表現(数値はカンマ区切り、真偽値はチェックボックス記号、日付は西暦/和暦)
+function textValueFor(key, calendarType) {
   const kind = VALUE_KINDS[key] || 'string';
   const raw = DATA[key];
   if (kind === 'number') return Number(raw).toLocaleString('ja-JP');
-  if (kind === 'boolean') return raw ? 'true' : 'false';
+  if (kind === 'boolean') return checkboxSymbol(Boolean(raw));
+  if (kind === 'date') return formatDateValue(raw, calendarType);
   return String(raw);
 }
 
 // 全シート・全セルを走査し、プレースホルダーを値に置換する。
 // ・1セルに複数のプレースホルダーが連続していても対応(${{都道府県}}${{番地}}...)
 // ・${{開始日}}〜${{終了日}} のような範囲表記も文字列置換で対応
-function fillXlsxPlaceholders(workbook) {
+// ・calendarType: 日付を 'era'(和暦) にするか、それ以外(西暦)にするか
+function fillXlsxPlaceholders(workbook, calendarType) {
   workbook.eachSheet((sheet) => {
     sheet.eachRow({ includeEmpty: false }, (row) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
@@ -114,7 +162,7 @@ function fillXlsxPlaceholders(workbook) {
         const exact = raw.match(EXACT_PLACEHOLDER_RE);
         if (exact) {
           const key = normalizeKey(exact[1]);
-          if (key) cell.value = exactValueFor(key);
+          if (key) cell.value = exactValueFor(key, calendarType);
           return;
         }
 
@@ -122,7 +170,7 @@ function fillXlsxPlaceholders(workbook) {
         if (PLACEHOLDER_RE.test(raw)) {
           cell.value = raw.replace(PLACEHOLDER_RE, (match, token) => {
             const key = normalizeKey(token);
-            return key ? textValueFor(key) : match;
+            return key ? textValueFor(key, calendarType) : match;
           });
         }
       });
@@ -147,13 +195,29 @@ function collectXlsxTokens(workbook) {
   return tokens;
 }
 
+// 1件のテンプレートが日付項目(開始日/終了日)を含むかどうかを調べる
+// (ダウンロード時に西暦/和暦の選択ダイアログを出すかどうかの判定に使う)
+async function templateHasDateFields(filename) {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(path.join(TEMPLATES_DIR, filename));
+  const tokens = collectXlsxTokens(workbook);
+  return [...tokens].some((t) => DATE_FIELD_KEYS.includes(normalizeKey(t)));
+}
+
 // 登録済みテンプレート一覧(templates/内の.xlsxファイル)
-function listTemplates() {
-  return fs
+async function listTemplates() {
+  const files = fs
     .readdirSync(TEMPLATES_DIR)
     .filter((f) => path.extname(f).toLowerCase() === SUPPORTED_EXT)
-    .sort()
-    .map((f) => ({ id: f, name: f }));
+    .sort();
+
+  return Promise.all(
+    files.map(async (f) => ({
+      id: f,
+      name: f,
+      hasDateFields: await templateHasDateFields(f),
+    }))
+  );
 }
 
 // 同名ファイルがあれば連番を付けて重複を避ける
@@ -171,8 +235,8 @@ function uniqueFilename(originalName) {
 }
 
 // 一覧取得(保存一覧)
-app.get('/api/templates', (req, res) => {
-  res.json(listTemplates());
+app.get('/api/templates', async (req, res) => {
+  res.json(await listTemplates());
 });
 
 // 埋め込み可能な項目一覧(アップロード画面での案内用)
@@ -183,11 +247,14 @@ app.get('/api/fields', (req, res) => {
     labels[key].push(label);
   }
   res.json(
-    Object.entries(labels).map(([key, tokens]) => ({
-      key,
-      tokens,
-      sampleValue: DATA[key],
-    }))
+    Object.entries(labels).map(([key, tokens]) => {
+      const kind = VALUE_KINDS[key] || 'string';
+      let sampleValue;
+      if (kind === 'date') sampleValue = formatDateGregorian(DATA[key]);
+      else if (kind === 'boolean') sampleValue = checkboxSymbol(DATA[key]);
+      else sampleValue = DATA[key];
+      return { key, tokens, sampleValue };
+    })
   );
 });
 
@@ -245,11 +312,11 @@ app.post('/api/templates', upload.array('templates'), async (req, res) => {
     }
   }
 
-  res.json({ results, templates: listTemplates() });
+  res.json({ results, templates: await listTemplates() });
 });
 
 // テンプレート削除
-app.delete('/api/templates/:id', (req, res) => {
+app.delete('/api/templates/:id', async (req, res) => {
   const filename = path.basename(req.params.id);
   const filePath = path.join(TEMPLATES_DIR, filename);
   if (!fs.existsSync(filePath)) {
@@ -257,19 +324,21 @@ app.delete('/api/templates/:id', (req, res) => {
   }
   fs.unlinkSync(filePath);
   console.log(`[template delete] file="${filename}"`);
-  res.json({ templates: listTemplates() });
+  res.json({ templates: await listTemplates() });
 });
 
 // ダウンロード: 保存済みテンプレート1件にモックデータを埋め込んで返す
+// calendarType クエリパラメータ('era'なら和暦、それ以外は西暦)で日付の表示形式を切り替える
 app.get('/api/report/generate/:id', async (req, res) => {
   try {
     const filePath = path.join(TEMPLATES_DIR, req.params.id);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'テンプレートが見つかりません' });
     }
+    const calendarType = req.query.calendar === 'era' ? 'era' : 'gregorian';
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    fillXlsxPlaceholders(workbook);
+    fillXlsxPlaceholders(workbook, calendarType);
 
     res.setHeader('Content-Type', CONTENT_TYPE_XLSX);
     res.setHeader(
