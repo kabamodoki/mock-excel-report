@@ -1,130 +1,75 @@
-// 帳票テンプレート(template.xlsx)を生成するスクリプト
+// サンプルExcelテンプレート(template.xlsx)を生成するスクリプト
 // 実行: npm run build-template
+// プレースホルダーの書式は ${{xxxx}}。住所のように複数を1セルに連結したり、
+// 日付範囲のように「〜」で挟んだりするパターンのデモも含む。
+// また、複数シートを正しく走査できることを確認するため2枚目のシートにも項目を置いている。
 const ExcelJS = require('exceljs');
 const path = require('path');
 
 async function main() {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('御請求書', {
-    pageSetup: { paperSize: 9, orientation: 'portrait' },
-  });
+  const sheet = workbook.addWorksheet('会員登録シート');
 
-  // 列幅
-  sheet.columns = [
-    { width: 4 },
-    { width: 16 },
-    { width: 16 },
-    { width: 16 },
-    { width: 16 },
-    { width: 16 },
-    { width: 16 },
-  ];
+  sheet.columns = [{ width: 4 }, { width: 20 }, { width: 30 }, { width: 20 }];
 
   const thin = { style: 'thin', color: { argb: 'FF999999' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
 
-  // タイトル
-  sheet.mergeCells('B2:G2');
+  sheet.mergeCells('B2:D2');
   const title = sheet.getCell('B2');
-  title.value = '御 請 求 書';
-  title.font = { size: 20, bold: true };
+  title.value = '会 員 登 録 シ ー ト';
+  title.font = { size: 18, bold: true };
   title.alignment = { horizontal: 'center' };
 
-  // 発行日・宛名
-  sheet.getCell('B4').value = '発行日';
+  sheet.getCell('B4').value = '氏名';
   sheet.getCell('B4').font = { bold: true };
   sheet.mergeCells('C4:D4');
-  sheet.getCell('C4').value = '${date}';
-  sheet.getCell('C4').alignment = { horizontal: 'left' };
+  sheet.getCell('C4').value = '${{姓}} ${{名}}';
   sheet.getCell('C4').border = border;
-  // ↑ プレースホルダー: ${date} と書かれたセルが日付で置換される
 
-  sheet.mergeCells('B6:D6');
-  const atesaki = sheet.getCell('B6');
-  atesaki.value = '${name}　御中';
-  atesaki.font = { size: 14, bold: true, underline: true };
-  // ↑ プレースホルダー: ${name} を含むセルが名前で置換される(前後の文言は残る)
+  sheet.getCell('B5').value = '住所';
+  sheet.getCell('B5').font = { bold: true };
+  sheet.mergeCells('C5:D5');
+  // 住所は複数のプレースホルダーを1セルに連結するパターン
+  sheet.getCell('C5').value =
+    '${{都道府県}}${{住所}}${{番地}} ${{マンションなど}}';
+  sheet.getCell('C5').border = border;
 
-  sheet.mergeCells('B8:G8');
-  sheet.getCell('B8').value =
-    '下記の通りご請求申し上げます。何卒よろしくお願い申し上げます。';
-  sheet.getCell('B8').font = { size: 10 };
+  sheet.getCell('B6').value = '利用期間';
+  sheet.getCell('B6').font = { bold: true };
+  sheet.mergeCells('C6:D6');
+  // 日付範囲は「〜」で挟むパターン
+  sheet.getCell('C6').value = '${{開始日}} 〜 ${{終了日}}';
+  sheet.getCell('C6').border = border;
 
-  // 明細テーブルヘッダー
-  const headerRow = 10;
-  const headers = ['No.', '項目', '数量', '単位', '金額'];
-  const headerCols = ['B', 'C', 'E', 'F', 'G'];
-  headers.forEach((h, i) => {
-    const cell = sheet.getCell(`${headerCols[i]}${headerRow}`);
-    cell.value = h;
-    cell.font = { bold: true };
-    cell.alignment = { horizontal: 'center' };
-    cell.border = border;
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFEFEFEF' },
-    };
-  });
-  sheet.mergeCells(`C${headerRow}:D${headerRow}`);
+  sheet.getCell('B8').value = '備考';
+  sheet.getCell('B8').font = { bold: true };
+  sheet.mergeCells('C8:D8');
+  sheet.getCell('C8').value = '${{サンプルテキスト1}}';
+  sheet.getCell('C8').border = border;
 
-  // 明細行1: お金①
-  const row1 = headerRow + 1;
-  sheet.getCell(`B${row1}`).value = 1;
-  sheet.mergeCells(`C${row1}:D${row1}`);
-  sheet.getCell(`C${row1}`).value = 'コンサルティング費用';
-  sheet.getCell(`E${row1}`).value = 1;
-  sheet.getCell(`F${row1}`).value = '式';
-  sheet.getCell(`G${row1}`).value = '${money1}'; // ← プレースホルダー: お金①
-  sheet.getCell(`G${row1}`).numFmt = '#,##0"円"';
-  ['B', 'C', 'E', 'F', 'G'].forEach((c) => {
-    sheet.getCell(`${c}${row1}`).border = border;
-  });
+  sheet.getCell('B9').value = 'ポイント残高';
+  sheet.getCell('B9').font = { bold: true };
+  sheet.getCell('C9').value = '${{サンプル数値}}';
+  sheet.getCell('C9').numFmt = '#,##0"pt"';
+  sheet.getCell('C9').border = border;
 
-  // 明細行2: お金②
-  const row2 = headerRow + 2;
-  sheet.getCell(`B${row2}`).value = 2;
-  sheet.mergeCells(`C${row2}:D${row2}`);
-  sheet.getCell(`C${row2}`).value = 'システム保守費用';
-  sheet.getCell(`E${row2}`).value = 1;
-  sheet.getCell(`F${row2}`).value = '式';
-  sheet.getCell(`G${row2}`).value = '${money2}'; // ← プレースホルダー: お金②
-  sheet.getCell(`G${row2}`).numFmt = '#,##0"円"';
-  ['B', 'C', 'E', 'F', 'G'].forEach((c) => {
-    sheet.getCell(`${c}${row2}`).border = border;
-  });
+  sheet.getCell('B10').value = 'メール配信 希望';
+  sheet.getCell('B10').font = { bold: true };
+  sheet.getCell('C10').value = '${{チェックボックスtrue}}';
+  sheet.getCell('C10').border = border;
 
-  // 空行を数行追加してそれっぽく
-  for (let r = row2 + 1; r <= row2 + 3; r++) {
-    sheet.mergeCells(`C${r}:D${r}`);
-    ['B', 'C', 'E', 'F', 'G'].forEach((c) => {
-      sheet.getCell(`${c}${r}`).border = border;
-    });
-  }
+  sheet.getCell('B11').value = '退会フラグ';
+  sheet.getCell('B11').font = { bold: true };
+  sheet.getCell('C11').value = '${{チェックボックスfalse}}';
+  sheet.getCell('C11').border = border;
 
-  // 合計行
-  const totalRow = row2 + 4;
-  sheet.mergeCells(`B${totalRow}:F${totalRow}`);
-  sheet.getCell(`B${totalRow}`).value = '合計金額';
-  sheet.getCell(`B${totalRow}`).font = { bold: true };
-  sheet.getCell(`B${totalRow}`).alignment = { horizontal: 'right' };
-  sheet.getCell(`G${totalRow}`).value = {
-    formula: `SUM(G${row1}:G${row2})`,
-  };
-  sheet.getCell(`G${totalRow}`).numFmt = '#,##0"円"';
-  sheet.getCell(`G${totalRow}`).font = { bold: true };
-  sheet.getCell(`G${totalRow}`).border = border;
-  sheet.getCell(`B${totalRow}`).border = border;
-
-  // フッター
-  sheet.mergeCells(`B${totalRow + 3}:G${totalRow + 3}`);
-  sheet.getCell(`B${totalRow + 3}`).value =
-    '※本帳票はモックです。振込先口座等の情報はダミーです。';
-  sheet.getCell(`B${totalRow + 3}`).font = {
-    size: 9,
-    italic: true,
-    color: { argb: 'FF888888' },
-  };
+  // 複数シート対応の確認用に2枚目のシートにも項目を置く
+  const sheet2 = workbook.addWorksheet('補足シート');
+  sheet2.columns = [{ width: 20 }, { width: 30 }];
+  sheet2.getCell('A1').value = '発行者住所(補足シート)';
+  sheet2.getCell('A1').font = { bold: true };
+  sheet2.getCell('B1').value = '${{都道府県}}${{住所}}${{番地}}';
 
   const outPath = path.join(__dirname, 'templates', 'template.xlsx');
   await workbook.xlsx.writeFile(outPath);

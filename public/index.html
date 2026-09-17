@@ -8,36 +8,39 @@
   :root { color-scheme: light; }
   body {
     font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", sans-serif;
-    max-width: 560px;
+    max-width: 680px;
     margin: 40px auto;
     padding: 0 16px;
     color: #222;
     background: #fafafa;
   }
   h1 { font-size: 20px; margin-bottom: 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; }
   p.desc { color: #666; font-size: 13px; margin-top: 0; }
-  form {
+  section {
     background: #fff;
     border: 1px solid #ddd;
     border-radius: 8px;
-    padding: 24px;
+    padding: 20px 24px;
     margin-top: 16px;
   }
-  fieldset {
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-    margin-bottom: 20px;
-    padding: 12px 16px 16px;
-  }
-  legend { font-size: 13px; font-weight: bold; color: #444; padding: 0 4px; }
-  label {
-    display: block;
-    font-size: 13px;
+  .tabs { display: flex; gap: 8px; margin-top: 20px; }
+  .tab-btn {
+    flex: 1;
+    padding: 10px;
+    font-size: 14px;
     font-weight: bold;
-    margin: 12px 0 4px;
+    border: 1px solid #ccc;
+    background: #eee;
+    color: #555;
+    border-radius: 6px;
+    cursor: pointer;
   }
-  label:first-of-type { margin-top: 0; }
-  input[type="text"], input[type="number"], input[type="file"] {
+  .tab-btn.active { background: #2f6fed; color: #fff; border-color: #2f6fed; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  input[type="file"] {
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
@@ -45,11 +48,10 @@
     border: 1px solid #ccc;
     border-radius: 4px;
   }
-  .hint { color: #888; font-size: 12px; margin-top: 4px; }
+  .hint { color: #888; font-size: 12px; margin-top: 6px; }
   button {
-    width: 100%;
-    padding: 12px;
-    font-size: 15px;
+    padding: 10px 16px;
+    font-size: 14px;
     font-weight: bold;
     color: #fff;
     background: #2f6fed;
@@ -57,8 +59,46 @@
     border-radius: 6px;
     cursor: pointer;
   }
+  button.secondary { background: #6c757d; }
+  button.wide { width: 100%; padding: 12px; font-size: 15px; margin-top: 14px; }
   button:disabled { background: #aac0f0; cursor: not-allowed; }
-  #status { margin-top: 14px; font-size: 13px; }
+
+  ul.file-list { list-style: none; padding: 0; margin: 12px 0 0; }
+  ul.file-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+  ul.file-list li .size { color: #999; margin-left: 8px; }
+  ul.file-list li button {
+    padding: 4px 10px;
+    font-size: 12px;
+    background: #c0392b;
+  }
+  .empty { color: #999; font-size: 13px; padding: 10px 0; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 6px; font-size: 13px; border-bottom: 1px solid #eee; }
+  th { color: #666; font-weight: bold; }
+  td.dl-cell { text-align: right; }
+  td.dl-cell a.dl-btn {
+    display: inline-block;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #fff;
+    background: #2f6fed;
+    border-radius: 6px;
+    text-decoration: none;
+  }
+
+  .fields-table code { font-size: 12px; }
+  #status { margin-top: 12px; font-size: 13px; }
   #status.error { color: #c0392b; }
   #status.ok { color: #1b7a3d; }
 </style>
@@ -66,95 +106,239 @@
 <body>
   <h1>帳票Excel生成モック</h1>
   <p class="desc">
-    テンプレート(.xlsx)をアップロードし、4項目を入力すると
-    プレースホルダー(<code>${money1}</code> など)を埋めた帳票をダウンロードします。
-    テンプレートを指定しない場合はサンプルテンプレートが使われます。
+    Excel(.xlsx)テンプレートをアップロード→保存すると、社内に持っているモックデータで
+    プレースホルダー(<code>${{都道府県}}</code> など)を埋めた帳票を保存一覧からダウンロードできます。
   </p>
 
-  <form id="report-form">
-    <fieldset>
-      <legend>テンプレート(任意)</legend>
-      <label for="template">テンプレートファイル(.xlsx)</label>
-      <input type="file" id="template" name="template" accept=".xlsx">
-      <p class="hint">
-        セル内に <code>${date}</code> <code>${name}</code> <code>${money1}</code> <code>${money2}</code>
-        と書いてあれば、セル位置は自由です。未選択の場合はサンプルテンプレートを使用します。
-      </p>
-    </fieldset>
+  <div class="tabs">
+    <button type="button" class="tab-btn active" data-tab="upload">アップロード画面</button>
+    <button type="button" class="tab-btn" data-tab="download">ダウンロード画面</button>
+  </div>
 
-    <fieldset>
-      <legend>埋め込む項目</legend>
-      <label for="date">日付</label>
-      <input type="text" id="date" name="date" placeholder="例: 2026年09月01日">
+  <!-- ========== アップロード画面 ========== -->
+  <div id="screen-upload" class="screen active">
+    <section>
+      <h2>① ファイルを選択</h2>
+      <input type="file" id="file-input" accept=".xlsx" multiple>
+      <p class="hint">.xlsxのみ。複数選択可。選ぶとまず下に一覧が表示されるだけで、まだサーバーには送られません。</p>
 
-      <label for="name">名前</label>
-      <input type="text" id="name" name="name" placeholder="例: サンプル株式会社">
+      <h2 style="margin-top:20px;">選択中のファイル</h2>
+      <ul class="file-list" id="pending-list"></ul>
+      <p class="empty" id="pending-empty">選択中のファイルはありません</p>
 
-      <label for="money1">お金①</label>
-      <input type="number" id="money1" name="money1" placeholder="例: 150000">
+      <button type="button" id="save-btn" class="wide">② 保存する</button>
+    </section>
 
-      <label for="money2">お金②</label>
-      <input type="number" id="money2" name="money2" placeholder="例: 32000">
+    <section>
+      <h2>埋め込み可能な項目</h2>
+      <p class="hint">テンプレートには <code>${{キー名}}</code> の形式で埋め込みたい項目を書いてください。1セルに複数連結(住所など)や「〜」区切り(日付範囲)も可能です。</p>
+      <div style="overflow-x:auto;">
+        <table class="fields-table">
+          <thead><tr><th>プレースホルダー例</th><th>サンプル値</th></tr></thead>
+          <tbody id="fields-tbody"></tbody>
+        </table>
+      </div>
+    </section>
 
-      <p class="hint">空欄のままにするとダミー値が使われます。</p>
-    </fieldset>
+    <section>
+      <h2>保存一覧</h2>
+      <table>
+        <thead><tr><th>テンプレート名</th></tr></thead>
+        <tbody id="saved-tbody-upload"></tbody>
+      </table>
+    </section>
+  </div>
 
-    <button type="submit" id="submit-btn">帳票を生成してダウンロード</button>
-    <div id="status"></div>
-  </form>
+  <!-- ========== ダウンロード画面 ========== -->
+  <div id="screen-download" class="screen">
+    <section>
+      <h2>保存一覧からダウンロード</h2>
+      <table>
+        <thead>
+          <tr><th>テンプレート名</th><th class="dl-cell">ダウンロード</th></tr>
+        </thead>
+        <tbody id="saved-tbody-download"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div id="status"></div>
 
   <script>
-    const form = document.getElementById('report-form');
     const statusEl = document.getElementById('status');
-    const submitBtn = document.getElementById('submit-btn');
+    const fileInput = document.getElementById('file-input');
+    const pendingList = document.getElementById('pending-list');
+    const pendingEmpty = document.getElementById('pending-empty');
+    const saveBtn = document.getElementById('save-btn');
+    const savedTbodyUpload = document.getElementById('saved-tbody-upload');
+    const savedTbodyDownload = document.getElementById('saved-tbody-download');
+    const fieldsTbody = document.getElementById('fields-tbody');
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      statusEl.className = '';
-      statusEl.textContent = '';
-      submitBtn.disabled = true;
-      submitBtn.textContent = '生成中...';
+    let pendingFiles = [];
 
+    function setStatus(message, type) {
+      statusEl.className = type || '';
+      statusEl.textContent = message || '';
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      return `${(bytes / 1024).toFixed(1)} KB`;
+    }
+
+    // ---- タブ切り替え ----
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(`screen-${btn.dataset.tab}`).classList.add('active');
+        if (btn.dataset.tab === 'download') refreshTemplates();
+      });
+    });
+
+    // ---- 選択中ファイル一覧(まだサーバーには送らない) ----
+    function renderPendingList() {
+      pendingList.innerHTML = '';
+      pendingEmpty.hidden = pendingFiles.length > 0;
+      pendingFiles.forEach((file, index) => {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = file.name;
+        const sizeSpan = document.createElement('span');
+        sizeSpan.className = 'size';
+        sizeSpan.textContent = formatSize(file.size);
+        label.appendChild(sizeSpan);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = '削除';
+        removeBtn.addEventListener('click', () => {
+          pendingFiles.splice(index, 1);
+          renderPendingList();
+        });
+
+        li.appendChild(label);
+        li.appendChild(removeBtn);
+        pendingList.appendChild(li);
+      });
+    }
+
+    fileInput.addEventListener('change', () => {
+      pendingFiles = pendingFiles.concat(Array.from(fileInput.files));
+      fileInput.value = '';
+      renderPendingList();
+    });
+
+    // ---- 保存(2段階目: 実際にサーバーへ送信) ----
+    saveBtn.addEventListener('click', async () => {
+      if (pendingFiles.length === 0) {
+        setStatus('保存するファイルがありません。', 'error');
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = '保存中...';
       try {
         const formData = new FormData();
-        const templateFile = document.getElementById('template').files[0];
-        if (templateFile) formData.append('template', templateFile);
+        pendingFiles.forEach((file) => formData.append('templates', file));
 
-        ['date', 'name', 'money1', 'money2'].forEach((key) => {
-          const val = document.getElementById(key).value.trim();
-          if (val !== '') formData.append(key, val);
-        });
-
-        const res = await fetch('/api/report/generate', {
-          method: 'POST',
-          body: formData,
-        });
+        const res = await fetch('/api/templates', { method: 'POST', body: formData });
+        const body = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `HTTPエラー: ${res.status}`);
+          throw new Error(body.error || `HTTPエラー: ${res.status}`);
         }
 
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'report.xlsx';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        const results = body.results || [];
+        const errors = results.filter((r) => r.status === 'error');
+        const okFiles = new Set(results.filter((r) => r.status === 'ok').map((r) => r.filename));
 
-        statusEl.className = 'ok';
-        statusEl.textContent = '帳票を生成しました。ダウンロードを確認してください。';
+        // 保存に成功したファイルだけ選択中リストから外す(失敗分は残して再試行できるようにする)
+        pendingFiles = pendingFiles.filter((f) => !okFiles.has(f.name));
+        renderPendingList();
+
+        if (errors.length > 0) {
+          const message = errors.map((e) => `・${e.filename}\n  ${e.message}`).join('\n\n');
+          window.alert('登録できなかったファイルがあります:\n\n' + message);
+        }
+
+        if (okFiles.size > 0) {
+          setStatus(`${okFiles.size}件を保存しました。`, 'ok');
+        } else {
+          setStatus('保存できたファイルはありませんでした。', 'error');
+        }
+
+        renderSavedList(body.templates || []);
       } catch (err) {
-        statusEl.className = 'error';
-        statusEl.textContent = 'エラー: ' + err.message;
+        window.alert('エラー: ' + err.message);
+        setStatus('エラー: ' + err.message, 'error');
       } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = '帳票を生成してダウンロード';
+        saveBtn.disabled = false;
+        saveBtn.textContent = '② 保存する';
       }
     });
+
+    // ---- 保存一覧(アップロード画面・ダウンロード画面の両方に表示) ----
+    function renderSavedList(templates) {
+      savedTbodyUpload.innerHTML = '';
+      savedTbodyDownload.innerHTML = '';
+
+      if (templates.length === 0) {
+        savedTbodyUpload.innerHTML = '<tr><td class="empty">まだ保存されたテンプレートがありません</td></tr>';
+        savedTbodyDownload.innerHTML = '<tr><td colspan="2" class="empty">まだ保存されたテンプレートがありません</td></tr>';
+        return;
+      }
+
+      templates.forEach((tpl) => {
+        const rowUpload = document.createElement('tr');
+        const cellUpload = document.createElement('td');
+        cellUpload.textContent = tpl.name;
+        rowUpload.appendChild(cellUpload);
+        savedTbodyUpload.appendChild(rowUpload);
+
+        const rowDownload = document.createElement('tr');
+        const nameTd = document.createElement('td');
+        nameTd.textContent = tpl.name;
+        const dlTd = document.createElement('td');
+        dlTd.className = 'dl-cell';
+        const dlLink = document.createElement('a');
+        dlLink.className = 'dl-btn';
+        dlLink.href = `/api/report/generate/${encodeURIComponent(tpl.id)}`;
+        dlLink.textContent = 'ダウンロード';
+        dlTd.appendChild(dlLink);
+        rowDownload.appendChild(nameTd);
+        rowDownload.appendChild(dlTd);
+        savedTbodyDownload.appendChild(rowDownload);
+      });
+    }
+
+    async function refreshTemplates() {
+      const res = await fetch('/api/templates');
+      const templates = await res.json();
+      renderSavedList(templates);
+      return templates;
+    }
+
+    // ---- 埋め込み可能な項目一覧 ----
+    async function loadFields() {
+      const res = await fetch('/api/fields');
+      const fields = await res.json();
+      fieldsTbody.innerHTML = '';
+      fields.forEach((f) => {
+        const tr = document.createElement('tr');
+        const tokenTd = document.createElement('td');
+        tokenTd.innerHTML = f.tokens.map((t) => `<code>\${{${t}}}</code>`).join(' / ');
+        const valueTd = document.createElement('td');
+        valueTd.textContent = String(f.sampleValue);
+        tr.appendChild(tokenTd);
+        tr.appendChild(valueTd);
+        fieldsTbody.appendChild(tr);
+      });
+    }
+
+    renderPendingList();
+    loadFields();
+    refreshTemplates();
   </script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "name": "mock-excel-report",
   "version": "1.0.0",
-  "description": "帳票Excelに金額・名前・日付を埋め込むモックサーバー",
+  "description": "Excel帳票に住所・氏名・期間などの項目を埋め込むモックサーバー",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
