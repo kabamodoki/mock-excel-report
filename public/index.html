@@ -160,7 +160,8 @@
     <section>
       <h2>① ファイルを選択</h2>
       <input type="file" id="file-input" accept=".xlsx" multiple>
-      <p class="hint">.xlsxのみ。複数選択可。選ぶとまず下に一覧が表示されるだけで、まだサーバーには送られません。</p>
+      <p class="hint">.xlsxのみ。複数選択可。選んだ時点でプレースホルダーの検証だけ行われ(まだファイルは保存されません)、
+        問題がなければ下の「選択中のファイル」に追加されます。未対応のプレースホルダーがあるとここでエラーになります。</p>
 
       <h2 style="margin-top:20px;">選択中のファイル</h2>
       <ul class="file-list" id="pending-list"></ul>
@@ -319,10 +320,46 @@
       });
     }
 
-    fileInput.addEventListener('change', () => {
-      pendingFiles = pendingFiles.concat(Array.from(fileInput.files));
+    // ファイルを選んだ時点(アップロード)で即検証する。プレースホルダーに未対応の項目が
+    // 含まれるファイルはここでエラーダイアログを出し、選択中リストには追加しない。
+    fileInput.addEventListener('change', async () => {
+      const files = Array.from(fileInput.files);
       fileInput.value = '';
-      renderPendingList();
+      if (files.length === 0) return;
+
+      fileInput.disabled = true;
+      setStatus('検証中...', '');
+      try {
+        const formData = new FormData();
+        files.forEach((file) => formData.append('templates', file));
+
+        const res = await fetch('/api/templates/validate', { method: 'POST', body: formData });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || `HTTPエラー: ${res.status}`);
+
+        const results = body.results || [];
+        const okNames = new Set(results.filter((r) => r.status === 'ok').map((r) => r.filename));
+        const errors = results.filter((r) => r.status === 'error');
+
+        const okFiles = files.filter((f) => okNames.has(f.name));
+        pendingFiles = pendingFiles.concat(okFiles);
+        renderPendingList();
+
+        if (errors.length > 0) {
+          const message = errors.map((e) => `・${e.filename}\n  ${e.message}`).join('\n\n');
+          window.alert('アップロードできなかったファイルがあります:\n\n' + message);
+        }
+
+        setStatus(
+          okFiles.length > 0 ? `${okFiles.length}件を選択中リストに追加しました。` : '',
+          okFiles.length > 0 ? 'ok' : ''
+        );
+      } catch (err) {
+        window.alert('エラー: ' + err.message);
+        setStatus('エラー: ' + err.message, 'error');
+      } finally {
+        fileInput.disabled = false;
+      }
     });
 
     // ---- 保存(2段階目: 実際にサーバーへ送信) ----

@@ -127,6 +127,14 @@ function normalizeKey(raw) {
   return ALIASES[raw.trim()] || null;
 }
 
+// Content-Dispositionヘッダーを組み立てる(RFC 5987準拠)。
+// 日本語ファイル名でも文字化けせず、確実に「添付ファイル」として扱われるようにする。
+function contentDispositionAttachment(filename) {
+  const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+  const utf8Encoded = encodeURIComponent(filename);
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
+}
+
 // セル全体がプレースホルダーだけの場合の値(型を保持: 数値は数値のまま。
 // 真偽値はチェックボックス記号、日付は西暦/和暦の文字列にする)
 function exactValueFor(key, calendarType) {
@@ -258,11 +266,64 @@ app.get('/api/fields', (req, res) => {
   );
 });
 
-// テンプレート保存(2段階目): 複数ファイルをまとめて受け取り、1件ずつ検証してから保存する。
+// 1ファイルを検証する(①②⑤⑥に対応)。保存はしない。
 // ①${{xxx}}形式のプレースホルダーを検出
-// ②検出したxxxがDATA(ALIASES)に存在しない場合はエラーとしてそのファイルは保存しない
+// ②検出したxxxがDATA(ALIASES)に存在しない場合はエラー
 // ⑤検出したプレースホルダー一覧はログに出す
-// ⑥複数シートをすべて走査する(collectXlsxTokens/fillXlsxPlaceholdersがworkbook.eachSheetで対応)
+// ⑥複数シートをすべて走査する(collectXlsxTokensがworkbook.eachSheetで対応)
+async function validateTemplateFile(file, logPrefix) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext !== SUPPORTED_EXT) {
+    return {
+      filename: file.originalname,
+      status: 'error',
+      message: '.xlsx のみ登録できます(今回はExcelのみ対応)',
+    };
+  }
+
+  try {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(file.buffer);
+
+    const tokens = [...collectXlsxTokens(workbook)];
+    console.log(`[${logPrefix}] file="${file.originalname}" placeholders=`, tokens);
+
+    const unknownTokens = tokens.filter((t) => !normalizeKey(t));
+    if (unknownTokens.length > 0) {
+      const message = `未対応のプレースホルダーが含まれています: ${unknownTokens
+        .map((t) => `\${{${t}}}`)
+        .join(', ')}`;
+      console.warn(`[${logPrefix}] file="${file.originalname}" rejected: ${message}`);
+      return { filename: file.originalname, status: 'error', message, tokens };
+    }
+
+    return { filename: file.originalname, status: 'ok', tokens };
+  } catch (err) {
+    console.error(err);
+    return {
+      filename: file.originalname,
+      status: 'error',
+      message: 'ファイルの読み込みに失敗しました(.xlsx形式として壊れている可能性があります)',
+    };
+  }
+}
+
+// アップロード(1段階目): ファイルを選んだ時点で検証だけ行う。保存はしない。
+// ここでエラーが出たファイルは「選択中のファイル」に追加しない運用を想定。
+app.post('/api/templates/validate', upload.array('templates'), async (req, res) => {
+  const files = req.files || [];
+  if (files.length === 0) {
+    return res.status(400).json({ error: 'ファイルが選択されていません' });
+  }
+  const results = [];
+  for (const file of files) {
+    results.push(await validateTemplateFile(file, 'template validate'));
+  }
+  res.json({ results });
+});
+
+// 保存(2段階目): 複数ファイルをまとめて受け取り、1件ずつ検証してから保存する。
+// (アップロード時点で検証済みだが、念のため保存時にも同じ検証を行う)
 app.post('/api/templates', upload.array('templates'), async (req, res) => {
   const files = req.files || [];
   if (files.length === 0) {
@@ -272,44 +333,14 @@ app.post('/api/templates', upload.array('templates'), async (req, res) => {
   const results = [];
 
   for (const file of files) {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ext !== SUPPORTED_EXT) {
-      results.push({
-        filename: file.originalname,
-        status: 'error',
-        message: '.xlsx のみ登録できます(今回はExcelのみ対応)',
-      });
+    const result = await validateTemplateFile(file, 'template upload');
+    if (result.status === 'error') {
+      results.push(result);
       continue;
     }
-
-    try {
-      const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(file.buffer);
-
-      const tokens = [...collectXlsxTokens(workbook)];
-      console.log(`[template upload] file="${file.originalname}" placeholders=`, tokens);
-
-      const unknownTokens = tokens.filter((t) => !normalizeKey(t));
-      if (unknownTokens.length > 0) {
-        const message = `未対応のプレースホルダーが含まれています: ${unknownTokens
-          .map((t) => `\${{${t}}}`)
-          .join(', ')}`;
-        console.warn(`[template upload] file="${file.originalname}" rejected: ${message}`);
-        results.push({ filename: file.originalname, status: 'error', message, tokens });
-        continue;
-      }
-
-      const filename = uniqueFilename(file.originalname);
-      fs.writeFileSync(path.join(TEMPLATES_DIR, filename), file.buffer);
-      results.push({ filename, status: 'ok', tokens });
-    } catch (err) {
-      console.error(err);
-      results.push({
-        filename: file.originalname,
-        status: 'error',
-        message: 'ファイルの読み込みに失敗しました(.xlsx形式として壊れている可能性があります)',
-      });
-    }
+    const filename = uniqueFilename(file.originalname);
+    fs.writeFileSync(path.join(TEMPLATES_DIR, filename), file.buffer);
+    results.push({ ...result, filename });
   }
 
   res.json({ results, templates: await listTemplates() });
@@ -341,10 +372,7 @@ app.get('/api/report/generate/:id', async (req, res) => {
     fillXlsxPlaceholders(workbook, calendarType);
 
     res.setHeader('Content-Type', CONTENT_TYPE_XLSX);
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(req.params.id)}"`
-    );
+    res.setHeader('Content-Disposition', contentDispositionAttachment(req.params.id));
     const buffer = await workbook.xlsx.writeBuffer();
     res.send(buffer);
   } catch (err) {
