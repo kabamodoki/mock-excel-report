@@ -96,6 +96,11 @@
     border-radius: 6px;
     text-decoration: none;
   }
+  td.dl-cell button.delete-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    background: #c0392b;
+  }
 
   .fields-table code { font-size: 12px; }
   #status { margin-top: 12px; font-size: 13px; }
@@ -143,7 +148,7 @@
     <section>
       <h2>保存一覧</h2>
       <table>
-        <thead><tr><th>テンプレート名</th></tr></thead>
+        <thead><tr><th>テンプレート名</th><th class="dl-cell">削除</th></tr></thead>
         <tbody id="saved-tbody-upload"></tbody>
       </table>
     </section>
@@ -155,7 +160,7 @@
       <h2>保存一覧からダウンロード</h2>
       <table>
         <thead>
-          <tr><th>テンプレート名</th><th class="dl-cell">ダウンロード</th></tr>
+          <tr><th>テンプレート名</th><th class="dl-cell">ダウンロード</th><th class="dl-cell">削除</th></tr>
         </thead>
         <tbody id="saved-tbody-download"></tbody>
       </table>
@@ -284,8 +289,8 @@
       savedTbodyDownload.innerHTML = '';
 
       if (templates.length === 0) {
-        savedTbodyUpload.innerHTML = '<tr><td class="empty">まだ保存されたテンプレートがありません</td></tr>';
-        savedTbodyDownload.innerHTML = '<tr><td colspan="2" class="empty">まだ保存されたテンプレートがありません</td></tr>';
+        savedTbodyUpload.innerHTML = '<tr><td colspan="2" class="empty">まだ保存されたテンプレートがありません</td></tr>';
+        savedTbodyDownload.innerHTML = '<tr><td colspan="3" class="empty">まだ保存されたテンプレートがありません</td></tr>';
         return;
       }
 
@@ -293,7 +298,11 @@
         const rowUpload = document.createElement('tr');
         const cellUpload = document.createElement('td');
         cellUpload.textContent = tpl.name;
+        const deleteTdUpload = document.createElement('td');
+        deleteTdUpload.className = 'dl-cell';
+        deleteTdUpload.appendChild(makeDeleteButton(tpl));
         rowUpload.appendChild(cellUpload);
+        rowUpload.appendChild(deleteTdUpload);
         savedTbodyUpload.appendChild(rowUpload);
 
         const rowDownload = document.createElement('tr');
@@ -306,10 +315,37 @@
         dlLink.href = `/api/report/generate/${encodeURIComponent(tpl.id)}`;
         dlLink.textContent = 'ダウンロード';
         dlTd.appendChild(dlLink);
+        const deleteTdDownload = document.createElement('td');
+        deleteTdDownload.className = 'dl-cell';
+        deleteTdDownload.appendChild(makeDeleteButton(tpl));
         rowDownload.appendChild(nameTd);
         rowDownload.appendChild(dlTd);
+        rowDownload.appendChild(deleteTdDownload);
         savedTbodyDownload.appendChild(rowDownload);
       });
+    }
+
+    function makeDeleteButton(tpl) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'delete-btn';
+      btn.textContent = '削除';
+      btn.addEventListener('click', async () => {
+        if (!window.confirm(`「${tpl.name}」を削除しますか?`)) return;
+        btn.disabled = true;
+        try {
+          const res = await fetch(`/api/templates/${encodeURIComponent(tpl.id)}`, { method: 'DELETE' });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || `HTTPエラー: ${res.status}`);
+          renderSavedList(body.templates || []);
+          setStatus(`「${tpl.name}」を削除しました。`, 'ok');
+        } catch (err) {
+          window.alert('エラー: ' + err.message);
+          setStatus('エラー: ' + err.message, 'error');
+          btn.disabled = false;
+        }
+      });
+      return btn;
     }
 
     async function refreshTemplates() {

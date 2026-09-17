@@ -248,6 +248,18 @@ app.post('/api/templates', upload.array('templates'), async (req, res) => {
   res.json({ results, templates: listTemplates() });
 });
 
+// テンプレート削除
+app.delete('/api/templates/:id', (req, res) => {
+  const filename = path.basename(req.params.id);
+  const filePath = path.join(TEMPLATES_DIR, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'テンプレートが見つかりません' });
+  }
+  fs.unlinkSync(filePath);
+  console.log(`[template delete] file="${filename}"`);
+  res.json({ templates: listTemplates() });
+});
+
 // ダウンロード: 保存済みテンプレート1件にモックデータを埋め込んで返す
 app.get('/api/report/generate/:id', async (req, res) => {
   try {
