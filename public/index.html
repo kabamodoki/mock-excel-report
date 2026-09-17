@@ -313,6 +313,7 @@
         const dlLink = document.createElement('a');
         dlLink.className = 'dl-btn';
         dlLink.href = `/api/report/generate/${encodeURIComponent(tpl.id)}`;
+        dlLink.download = tpl.name;
         dlLink.textContent = 'ダウンロード';
         dlTd.appendChild(dlLink);
         const deleteTdDownload = document.createElement('td');
