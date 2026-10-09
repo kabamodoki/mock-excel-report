@@ -4,3 +4,6 @@ output/*
 templates/
 report*.xlsx
 *.log
+/server.js
+/server.js.map
+/*.tsbuildinfo

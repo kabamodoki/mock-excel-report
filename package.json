@@ -4,6 +4,8 @@
   "description": "Excel帳票に住所・氏名・期間などの項目を埋め込むモックサーバー",
   "main": "server.js",
   "scripts": {
+    "dev": "ts-node server.ts",
+    "build": "tsc",
     "start": "node server.js",
     "build-template": "node create-template.js",
     "build-samples": "node create-samples.js"
@@ -15,5 +17,12 @@
     "exceljs": "^4.4.0",
     "express": "4.17.1",
     "multer": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^7.0.2"
   }
 }

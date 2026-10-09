@@ -6,11 +6,11 @@
 // DBは見ず、値はすべてサーバー内に固定で持っているダミーデータを使う。
 //
 // ※登録済みテンプレートは templates/ ディレクトリに実ファイルとして保存する(モックなのでDB等は使わない)
-const express = require('express');
-const ExcelJS = require('exceljs');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
+import express, { Request, Response } from 'express';
+import ExcelJS from 'exceljs';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 app.use(express.json());
@@ -31,9 +31,25 @@ const upload = multer({ storage: multer.memoryStorage() });
 const PLACEHOLDER_RE = /\$\{\{\s*([^}]+?)\s*\}\}/g;
 const EXACT_PLACEHOLDER_RE = /^\$\{\{\s*([^}]+?)\s*\}\}$/;
 
+type CalendarType = 'gregorian' | 'era';
+type ValueKind = 'string' | 'number' | 'boolean' | 'date';
+type DataKey =
+  | 'prefecture'
+  | 'address'
+  | 'block'
+  | 'building'
+  | 'lastName'
+  | 'firstName'
+  | 'startDate'
+  | 'endDate'
+  | 'sampleText1'
+  | 'sampleNumber'
+  | 'checkboxTrue'
+  | 'checkboxFalse';
+
 // 埋め込めるデータ(モック用の固定値)。本番ではDBから取得する想定。
 // 日付はDateオブジェクトで持ち、ダウンロード時に西暦/和暦を選んで文字列化する。
-const DATA = {
+const DATA: Record<DataKey, string | number | boolean | Date> = {
   prefecture: '東京都',
   address: '港区六本木',
   block: '1-2-3',
@@ -50,7 +66,7 @@ const DATA = {
 
 // 値の種類。number/booleanはセル全体が1つのプレースホルダーだけの場合、型を保ったまま埋め込む。
 // dateは西暦/和暦の選択に応じて文字列化する。
-const VALUE_KINDS = {
+const VALUE_KINDS: Partial<Record<DataKey, ValueKind>> = {
   sampleNumber: 'number',
   checkboxTrue: 'boolean',
   checkboxFalse: 'boolean',
@@ -59,12 +75,12 @@ const VALUE_KINDS = {
 };
 
 // 日付項目のキー一覧(ダウンロード時に西暦/和暦ダイアログを出すかどうかの判定に使う)
-const DATE_FIELD_KEYS = Object.entries(VALUE_KINDS)
+const DATE_FIELD_KEYS = (Object.entries(VALUE_KINDS) as [DataKey, ValueKind][])
   .filter(([, kind]) => kind === 'date')
   .map(([key]) => key);
 
 // チェックボックスの表示: true→☑ / false→☐
-function checkboxSymbol(value) {
+function checkboxSymbol(value: boolean): string {
   return value ? '☑' : '☐';
 }
 
@@ -77,14 +93,14 @@ const ERAS = [
   { name: '明治', start: new Date(1868, 8, 8) },
 ];
 
-function formatDateGregorian(date) {
+function formatDateGregorian(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}年${m}月${d}日`;
 }
 
-function formatDateEra(date) {
+function formatDateEra(date: Date): string {
   const era = ERAS.find((e) => date >= e.start) || ERAS[ERAS.length - 1];
   const eraYear = date.getFullYear() - era.start.getFullYear() + 1;
   const yearLabel = eraYear === 1 ? '元' : String(eraYear);
@@ -94,12 +110,12 @@ function formatDateEra(date) {
 }
 
 // calendarType: 'era'(和暦) 以外は西暦として扱う
-function formatDateValue(date, calendarType) {
+function formatDateValue(date: Date, calendarType: CalendarType): string {
   return calendarType === 'era' ? formatDateEra(date) : formatDateGregorian(date);
 }
 
 // プレースホルダーのエイリアス(テンプレート内の表記) -> DATAのキー
-const ALIASES = {
+const ALIASES: Record<string, DataKey> = {
   '都道府県': 'prefecture',
   '住所': 'address',
   '番地': 'block',
@@ -123,13 +139,13 @@ const ALIASES = {
   'チェックぼっくすfalse': 'checkboxFalse',
 };
 
-function normalizeKey(raw) {
+function normalizeKey(raw: string): DataKey | null {
   return ALIASES[raw.trim()] || null;
 }
 
 // Content-Dispositionヘッダーを組み立てる(RFC 5987準拠)。
 // 日本語ファイル名でも文字化けせず、確実に「添付ファイル」として扱われるようにする。
-function contentDispositionAttachment(filename) {
+function contentDispositionAttachment(filename: string): string {
   const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
   const utf8Encoded = encodeURIComponent(filename);
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
@@ -137,22 +153,22 @@ function contentDispositionAttachment(filename) {
 
 // セル全体がプレースホルダーだけの場合の値(型を保持: 数値は数値のまま。
 // 真偽値はチェックボックス記号、日付は西暦/和暦の文字列にする)
-function exactValueFor(key, calendarType) {
+function exactValueFor(key: DataKey, calendarType: CalendarType): string | number {
   const kind = VALUE_KINDS[key] || 'string';
   const raw = DATA[key];
   if (kind === 'number') return Number(raw);
   if (kind === 'boolean') return checkboxSymbol(Boolean(raw));
-  if (kind === 'date') return formatDateValue(raw, calendarType);
+  if (kind === 'date') return formatDateValue(raw as Date, calendarType);
   return String(raw);
 }
 
 // 文中に埋め込む場合の文字列表現(数値はカンマ区切り、真偽値はチェックボックス記号、日付は西暦/和暦)
-function textValueFor(key, calendarType) {
+function textValueFor(key: DataKey, calendarType: CalendarType): string {
   const kind = VALUE_KINDS[key] || 'string';
   const raw = DATA[key];
   if (kind === 'number') return Number(raw).toLocaleString('ja-JP');
   if (kind === 'boolean') return checkboxSymbol(Boolean(raw));
-  if (kind === 'date') return formatDateValue(raw, calendarType);
+  if (kind === 'date') return formatDateValue(raw as Date, calendarType);
   return String(raw);
 }
 
@@ -160,7 +176,7 @@ function textValueFor(key, calendarType) {
 // ・1セルに複数のプレースホルダーが連続していても対応(${{都道府県}}${{番地}}...)
 // ・${{開始日}}〜${{終了日}} のような範囲表記も文字列置換で対応
 // ・calendarType: 日付を 'era'(和暦) にするか、それ以外(西暦)にするか
-function fillXlsxPlaceholders(workbook, calendarType) {
+function fillXlsxPlaceholders(workbook: ExcelJS.Workbook, calendarType: CalendarType): void {
   workbook.eachSheet((sheet) => {
     sheet.eachRow({ includeEmpty: false }, (row) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
@@ -188,14 +204,14 @@ function fillXlsxPlaceholders(workbook, calendarType) {
 
 // ワークブック内の全プレースホルダートークン(中括弧の中身)を集める(アップロード時の検証・ログ用)。
 // 複数シートすべてを対象にする。
-function collectXlsxTokens(workbook) {
-  const tokens = new Set();
+function collectXlsxTokens(workbook: ExcelJS.Workbook): Set<string> {
+  const tokens = new Set<string>();
   workbook.eachSheet((sheet) => {
     sheet.eachRow({ includeEmpty: false }, (row) => {
       row.eachCell({ includeEmpty: false }, (cell) => {
         if (typeof cell.value !== 'string') return;
         PLACEHOLDER_RE.lastIndex = 0;
-        let m;
+        let m: RegExpExecArray | null;
         while ((m = PLACEHOLDER_RE.exec(cell.value))) tokens.add(m[1].trim());
       });
     });
@@ -205,15 +221,24 @@ function collectXlsxTokens(workbook) {
 
 // 1件のテンプレートが日付項目(開始日/終了日)を含むかどうかを調べる
 // (ダウンロード時に西暦/和暦の選択ダイアログを出すかどうかの判定に使う)
-async function templateHasDateFields(filename) {
+async function templateHasDateFields(filename: string): Promise<boolean> {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(path.join(TEMPLATES_DIR, filename));
   const tokens = collectXlsxTokens(workbook);
-  return [...tokens].some((t) => DATE_FIELD_KEYS.includes(normalizeKey(t)));
+  return [...tokens].some((t) => {
+    const key = normalizeKey(t);
+    return key !== null && (DATE_FIELD_KEYS as string[]).includes(key);
+  });
+}
+
+interface TemplateSummary {
+  id: string;
+  name: string;
+  hasDateFields: boolean;
 }
 
 // 登録済みテンプレート一覧(templates/内の.xlsxファイル)
-async function listTemplates() {
+async function listTemplates(): Promise<TemplateSummary[]> {
   const files = fs
     .readdirSync(TEMPLATES_DIR)
     .filter((f) => path.extname(f).toLowerCase() === SUPPORTED_EXT)
@@ -229,7 +254,7 @@ async function listTemplates() {
 }
 
 // 同名ファイルがあれば連番を付けて重複を避ける
-function uniqueFilename(originalName) {
+function uniqueFilename(originalName: string): string {
   const base = path.basename(originalName).replace(/[\\/:*?"<>|]/g, '_');
   const ext = path.extname(base) || SUPPORTED_EXT;
   const stem = base.slice(0, base.length - ext.length) || 'template';
@@ -243,35 +268,45 @@ function uniqueFilename(originalName) {
 }
 
 // 一覧取得(保存一覧)
-app.get('/api/templates', async (req, res) => {
+app.get('/api/templates', async (req: Request, res: Response) => {
   res.json(await listTemplates());
 });
 
 // 埋め込み可能な項目一覧(アップロード画面での案内用)
-app.get('/api/fields', (req, res) => {
-  const labels = {};
+app.get('/api/fields', (req: Request, res: Response) => {
+  const labels: Partial<Record<DataKey, string[]>> = {};
   for (const [label, key] of Object.entries(ALIASES)) {
     if (!labels[key]) labels[key] = [];
-    labels[key].push(label);
+    labels[key]!.push(label);
   }
   res.json(
-    Object.entries(labels).map(([key, tokens]) => {
+    (Object.entries(labels) as [DataKey, string[]][]).map(([key, tokens]) => {
       const kind = VALUE_KINDS[key] || 'string';
-      let sampleValue;
-      if (kind === 'date') sampleValue = formatDateGregorian(DATA[key]);
-      else if (kind === 'boolean') sampleValue = checkboxSymbol(DATA[key]);
-      else sampleValue = DATA[key];
+      let sampleValue: string | number;
+      if (kind === 'date') sampleValue = formatDateGregorian(DATA[key] as Date);
+      else if (kind === 'boolean') sampleValue = checkboxSymbol(Boolean(DATA[key]));
+      else sampleValue = DATA[key] as string | number;
       return { key, tokens, sampleValue };
     })
   );
 });
+
+interface ValidationResult {
+  filename: string;
+  status: 'ok' | 'error';
+  message?: string;
+  tokens?: string[];
+}
 
 // 1ファイルを検証する(①②⑤⑥に対応)。保存はしない。
 // ①${{xxx}}形式のプレースホルダーを検出
 // ②検出したxxxがDATA(ALIASES)に存在しない場合はエラー
 // ⑤検出したプレースホルダー一覧はログに出す
 // ⑥複数シートをすべて走査する(collectXlsxTokensがworkbook.eachSheetで対応)
-async function validateTemplateFile(file, logPrefix) {
+async function validateTemplateFile(
+  file: Express.Multer.File,
+  logPrefix: string
+): Promise<ValidationResult> {
   const ext = path.extname(file.originalname).toLowerCase();
   if (ext !== SUPPORTED_EXT) {
     return {
@@ -283,7 +318,9 @@ async function validateTemplateFile(file, logPrefix) {
 
   try {
     const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(file.buffer);
+    // exceljsの型定義が独自に `declare interface Buffer extends ArrayBuffer {}` を宣言しており、
+    // @types/nodeの正式なBuffer型とグローバルスコープで衝突する。実行時の挙動には影響がないのでanyで吸収する。
+    await workbook.xlsx.load(file.buffer as any);
 
     const tokens = [...collectXlsxTokens(workbook)];
     console.log(`[${logPrefix}] file="${file.originalname}" placeholders=`, tokens);
@@ -310,12 +347,12 @@ async function validateTemplateFile(file, logPrefix) {
 
 // アップロード(1段階目): ファイルを選んだ時点で検証だけ行う。保存はしない。
 // ここでエラーが出たファイルは「選択中のファイル」に追加しない運用を想定。
-app.post('/api/templates/validate', upload.array('templates'), async (req, res) => {
-  const files = req.files || [];
+app.post('/api/templates/validate', upload.array('templates'), async (req: Request, res: Response) => {
+  const files = (req.files as Express.Multer.File[]) || [];
   if (files.length === 0) {
     return res.status(400).json({ error: 'ファイルが選択されていません' });
   }
-  const results = [];
+  const results: ValidationResult[] = [];
   for (const file of files) {
     results.push(await validateTemplateFile(file, 'template validate'));
   }
@@ -324,13 +361,13 @@ app.post('/api/templates/validate', upload.array('templates'), async (req, res) 
 
 // 保存(2段階目): 複数ファイルをまとめて受け取り、1件ずつ検証してから保存する。
 // (アップロード時点で検証済みだが、念のため保存時にも同じ検証を行う)
-app.post('/api/templates', upload.array('templates'), async (req, res) => {
-  const files = req.files || [];
+app.post('/api/templates', upload.array('templates'), async (req: Request, res: Response) => {
+  const files = (req.files as Express.Multer.File[]) || [];
   if (files.length === 0) {
     return res.status(400).json({ error: 'ファイルが選択されていません' });
   }
 
-  const results = [];
+  const results: (ValidationResult & { filename: string })[] = [];
 
   for (const file of files) {
     const result = await validateTemplateFile(file, 'template upload');
@@ -347,7 +384,7 @@ app.post('/api/templates', upload.array('templates'), async (req, res) => {
 });
 
 // テンプレート削除
-app.delete('/api/templates/:id', async (req, res) => {
+app.delete('/api/templates/:id', async (req: Request, res: Response) => {
   const filename = path.basename(req.params.id);
   const filePath = path.join(TEMPLATES_DIR, filename);
   if (!fs.existsSync(filePath)) {
@@ -360,13 +397,13 @@ app.delete('/api/templates/:id', async (req, res) => {
 
 // ダウンロード: 保存済みテンプレート1件にモックデータを埋め込んで返す
 // calendarType クエリパラメータ('era'なら和暦、それ以外は西暦)で日付の表示形式を切り替える
-app.get('/api/report/generate/:id', async (req, res) => {
+app.get('/api/report/generate/:id', async (req: Request, res: Response) => {
   try {
     const filePath = path.join(TEMPLATES_DIR, req.params.id);
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: 'テンプレートが見つかりません' });
     }
-    const calendarType = req.query.calendar === 'era' ? 'era' : 'gregorian';
+    const calendarType: CalendarType = req.query.calendar === 'era' ? 'era' : 'gregorian';
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
     fillXlsxPlaceholders(workbook, calendarType);
